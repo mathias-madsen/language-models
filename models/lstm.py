@@ -15,44 +15,56 @@ class CharacterPredictor(torch.nn.Module):
 
         self.output0 = torch.nn.Parameter(torch.rand(self.outdim))
         self.memory0 = torch.nn.Parameter(torch.rand(self.outdim))
+
+        # This parameter holds the vectors we use to represent each
+        # character in the character set. Indexing into this matrix
+        # is equivalent to one-hot encoding the observed character
+        # and then multiplying that one-hot vector by this matrix.
         self.encodings = torch.nn.Parameter(torch.rand(num_classes, self.indim))
 
         self.lstm = torch.nn.LSTM(self.indim,
                                   self.outdim,
                                   batch_first=False)
 
-        self.predictor = torch.nn.Sequential(torch.nn.Linear(self.outdim, 300),
-                                             torch.nn.ReLU(),
-                                             # torch.nn.Linear(300, 300),
-                                             # torch.nn.ReLU(),
-                                             torch.nn.Linear(300, num_classes))
+        self.decode = torch.nn.Linear(self.outdim, num_classes)
+
+        # self.decode = torch.nn.Sequential(torch.nn.Linear(self.outdim, 300),
+        #                                      torch.nn.ReLU(),
+        #                                      torch.nn.Linear(300, 300),
+        #                                      torch.nn.ReLU(),
+        #                                      torch.nn.Linear(300, num_classes))
+
+    def encode(self, idx):
+
+        return self.encodings[idx.to(torch.int64), :]
 
     def forward(self, ints):
 
         _, bsize = ints.shape
-        inputs = self.encodings[ints.to(torch.int64), :]  # (seq_length, bsize, indim)
+        inputs = self.encode(ints)  # (seq_length, bsize, indim)
         output0s = torch.ones([1, bsize, self.outdim]) * self.output0
         memory0s = torch.ones([1, bsize, self.outdim]) * self.memory0
         outputs, _ = self.lstm(inputs, (output0s, memory0s))
         outputs_total = torch.cat([output0s, outputs[:-1,]], axis=0)
 
-        return self.predictor(outputs_total)
+        return self.decode(outputs_total)
 
     def sample(self, length):
 
         input_t = None
-        output_t = self.output0[None, :]
-        memory_t = self.memory0[None, :]
+        out_t = self.output0[None, :]
+        mem_t = self.memory0[None, :]
 
         sentence = ""
         for _ in range(length):
-            logits = self.predictor(output_t)
+            logits = self.decode(out_t)
             probs_torch = torch.softmax(logits, dim=-1)
             probs_numpy = probs_torch.detach().numpy().flatten()
             idx = np.random.choice(self.num_classes, p=probs_numpy)
             sentence += chr(idx)
-            input_t = self.encodings[idx, None, :]
-            _, (output_t, memory_t) = self.lstm(input_t, (output_t, memory_t))
+            torch_int_vector = torch.as_tensor([idx], dtype=torch.int64)
+            encoded_t = self.encode(torch_int_vector)
+            _, (out_t, mem_t) = self.lstm(encoded_t, (out_t, mem_t))
 
         return sentence
 
