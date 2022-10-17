@@ -95,8 +95,9 @@ class DigramModel:
         idx = np.random.choice(p.size, p=p)
         string = chr(idx)
         for _ in range(length - 1):
-            p = self.joints[idx, :]
-            idx = np.random.choice(p.size, p=p)
+            marginals = self.joints[idx, :]
+            conditionals = marginals / marginals.sum()
+            idx = np.random.choice(conditionals.size, p=conditionals)
             string += chr(idx)
 
         return string
