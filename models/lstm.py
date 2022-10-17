@@ -3,11 +3,11 @@ import numpy as np
 from tqdm import tqdm
 
 
-class CharacterPredictor(torch.nn.Module):
+class LSTMCharacterPredictor(torch.nn.Module):
 
     def __init__(self, encoding_size, recurrence_size, num_classes=256):
 
-        super(CharacterPredictor, self).__init__()
+        super(LSTMCharacterPredictor, self).__init__()
 
         self.indim = encoding_size
         self.outdim = recurrence_size
@@ -21,7 +21,7 @@ class CharacterPredictor(torch.nn.Module):
         # is equivalent to one-hot encoding the observed character
         # and then multiplying that one-hot vector by this matrix.
         self.encodings = torch.nn.Parameter(torch.rand(num_classes, self.indim))
-
+        
         self.lstm = torch.nn.LSTM(self.indim,
                                   self.outdim,
                                   batch_first=False)
@@ -86,9 +86,10 @@ class CharacterPredictor(torch.nn.Module):
             train = train[np.random.permutation(len(train)),]
             batches = np.split(train, range(bsize, len(train), bsize))
             batches = torch.stack(batches[:-1], axis=0)
+            batches = batches[:max_train_steps]
             tlosses = []
-            for batch_first_ints in tqdm(batches[:max_train_steps]):
-                time_first_ints = batch_first_ints.T  # lead with sequence axis, as per convention
+            for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
+                time_first_ints = batch.T
                 optimizer.zero_grad()
                 logits = self(time_first_ints)
                 logits_flat = logits.reshape([-1, self.num_classes])
@@ -107,9 +108,10 @@ class CharacterPredictor(torch.nn.Module):
             val = val[np.random.permutation(len(val)),]
             batches = np.split(val, range(bsize, len(val), bsize))
             batches = torch.stack(batches[:-1], axis=0)
+            batches = batches[:max_train_steps]
             vlosses = []
-            for batch_first_ints in tqdm(batches[:max_train_steps]):
-                time_first_ints = batch_first_ints.T
+            for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
+                time_first_ints = batch.T  # so [seqlen, bsize]
                 logits = self(time_first_ints)
                 logits_flat = logits.reshape([-1, self.num_classes])
                 targets_flat = time_first_ints.reshape([-1])

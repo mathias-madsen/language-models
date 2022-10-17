@@ -4,20 +4,20 @@ import numpy as np
 from tqdm import tqdm
 
 from reader import load_corpus, convert_to_snippets
-from models.lstm import CharacterPredictor
+from models.lstm import LSTMCharacterPredictor
 from models.baselines import MonogramModel, DigramModel
 
 
 num_classes = 256  # alphabet size
 seq_length = 100  # length of the snippets to be predicted
-indim = 100  # dimensionality of the character-as-vector encoding
-outdim = 80  # dimensionality of each of the recurrent states
+encoding_size = 100  # dim of the vectors representing the chars
+recurrence_size = 80  # dim of the cell state and hidden state
 
-batch_size = 4
-learning_rate = 0.05
+batch_size = 16
+learning_rate = 0.1
 num_epochs = 100
-max_train_steps = 1000  # `None` means unlimited
-max_val_steps = 1000  # `None` means unlimited
+max_train_steps = 3000  # `None` means unlimited
+max_val_steps = 3000  # `None` means unlimited
 
 
 # load the data:
@@ -47,6 +47,10 @@ monogram_model = MonogramModel()
 print("Training loss: %.5f +/- %.5f" % (tmean, tstd))
 print("Validation loss: %.5f +/- %.5f" % (vmean, vstd))
 print()
+print("Sample:")
+print("-------")
+print(repr(monogram_model.sample(length=1000)))
+print()
 
 print("Digram baseline:")
 print("----------------")
@@ -55,9 +59,17 @@ digram_model = DigramModel()
 print("Training loss: %.5f +/- %.5f" % (tmean, tstd))
 print("Validation loss: %.5f +/- %.5f" % (vmean, vstd))
 print()
+print("Sample:")
+print("-------")
+print(repr(digram_model.sample(length=1000)))
+print()
 
 
-character_predictor = CharacterPredictor(indim, outdim, num_classes=num_classes)
+character_predictor = LSTMCharacterPredictor(
+                            encoding_size=encoding_size,
+                            recurrence_size=recurrence_size,
+                            num_classes=num_classes,
+                            )
 
 history = character_predictor.fit(
                 train,
@@ -65,6 +77,6 @@ history = character_predictor.fit(
                 num_epochs=1000,
                 bsize=batch_size,
                 lr=learning_rate,
-                max_train_steps=1000,
-                max_val_steps=1000,
+                max_train_steps=max_train_steps,
+                max_val_steps=max_val_steps,
                 )
