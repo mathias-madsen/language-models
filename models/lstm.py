@@ -89,7 +89,7 @@ class LSTMCharacterPredictor(torch.nn.Module):
             batches = batches[:max_train_steps]
             tlosses = []
             for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
-                time_first_ints = batch.T
+                time_first_ints = batch.T  # so [seqlen, bsize]
                 optimizer.zero_grad()
                 logits = self(time_first_ints)
                 logits_flat = logits.reshape([-1, self.num_classes])
