@@ -45,7 +45,12 @@ def load_corpus(textdir):
             intseq = np.uint8(indices)
         print("Done; contains %s characters." % len(intseq))
         integer_sequences.append(intseq)
-    print("Finished loading %s books.\n" % len(integer_sequences))
+    print("")
+
+    n_books = len(integer_sequences)
+    n_million_chars = 1e-6 * sum(len(b) for b in integer_sequences)
+    print("Finished loading %s books (%.1f million characters)\n"
+          % (n_books, n_million_chars))
 
     return np.concatenate(integer_sequences)
 
