@@ -29,8 +29,6 @@ snippets = torch.as_tensor(snippets_numpy)
 val_size = int(0.2 * len(snippets))
 val, train = np.split(snippets, [val_size], axis=0)
 
-print("That makes %s sequences of length %s." % tuple(snippets.shape))
-print()
 print("Train shape: %s" % (train.shape,))
 print("Val shape: %s" % (val.shape,))
 print()
