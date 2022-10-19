@@ -10,12 +10,12 @@ from models.baselines import MonogramModel, DigramModel
 
 num_classes = 256  # alphabet size
 seq_length = 100  # length of the snippets to be predicted
-num_hidden_states = 100  # number of hidden states in the HMM
+num_hidden_states = 500  # number of hidden states in the HMM
 
-batch_size = 16
+old_weight = 10.0
 num_epochs = 100
-max_train_steps = 3000  # `None` means unlimited
-max_val_steps = 3000  # `None` means unlimited
+num_train_steps = 300  # `None` means unlimited
+num_val_steps = 300  # `None` means unlimited
 
 
 # load the data:
@@ -26,41 +26,15 @@ snippets = convert_to_snippets(long_int_array, seq_length, shuffle=True)
 val_size = int(0.2 * len(snippets))
 val, train = np.split(snippets, [val_size], axis=0)
 
-print("Raw corpus length: %s" % snippets.size)
-print("That makes %s sequences of length %s." % tuple(snippets.shape))
-print()
 print("Train shape: %s" % (train.shape,))
 print("Val shape: %s" % (val.shape,))
 print()
 
-
-tseq = train.flatten()
-vseq = val.flatten()
-
-print("Monogram baseline:")
-print("------------------")
-monogram_model = MonogramModel()
-(tmean, tstd), (vmean, vstd) = monogram_model.fit(tseq, vseq)
-print("Training loss: %.5f +/- %.5f" % (tmean, tstd))
-print("Validation loss: %.5f +/- %.5f" % (vmean, vstd))
-print()
-print("Sample:")
-print("-------")
-print(repr(monogram_model.sample(length=1000)))
-print()
-
-print("Digram baseline:")
-print("----------------")
-digram_model = DigramModel()
-(tmean, tstd), (vmean, vstd) = digram_model.fit(tseq, vseq)
-print("Training loss: %.5f +/- %.5f" % (tmean, tstd))
-print("Validation loss: %.5f +/- %.5f" % (vmean, vstd))
-print()
-print("Sample:")
-print("-------")
-print(repr(digram_model.sample(length=1000)))
-print()
-
-
 hmm = HiddenMarkovModel(num_hidden_states, num_classes)
 
+trainhist, valhist = hmm.fit(train=train,
+                             val=val,
+                             num_epochs=num_epochs,
+                             old_weight=old_weight,
+                             num_train_steps=num_train_steps,
+                             num_val_steps=num_val_steps)

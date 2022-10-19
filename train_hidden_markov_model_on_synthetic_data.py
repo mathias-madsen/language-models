@@ -50,7 +50,9 @@ if __name__ == "__main__":
     print()
 
     print("Emission frequencies:")
-    for f1, f2 in zip(true_model.monochar, approx_model.monochar):
+    true_mono = true_model.compute_stationary_emission_dist()
+    approx_mono = true_model.compute_stationary_emission_dist()
+    for f1, f2 in zip(true_mono, approx_mono):
         print("%.8f, %.8f" % (f1, f2))
     print()
 

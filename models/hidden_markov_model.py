@@ -9,15 +9,12 @@ class HiddenMarkovModel:
 
     def __init__(self, nstates, nchars=256):
 
-        self._trans = np.random.dirichlet(np.ones(nstates), size=nstates)
-        self._emits = np.random.dirichlet(np.ones(nchars), size=nstates)
-
-        self.initial = self.compute_initial_distribution()
-        self.monochar = self.compute_stationary_emission_dist()
-        self.dichar = self.compute_stationary_emission_digram_dist()
-
         self.nstates = nstates
         self.nchars = nchars
+
+        self._trans = np.random.dirichlet(np.ones(nstates), size=nstates)
+        self._emits = np.random.dirichlet(np.ones(nchars), size=nstates)
+        self.initial = self.compute_initial_distribution()
 
     @property
     def emits(self):
@@ -27,8 +24,6 @@ class HiddenMarkovModel:
     def emits(self, value):
         assert value.shape == self._emits.shape  # no broadcasting
         self._emits[:, :] = value / value.sum(axis=1, keepdims=True)
-        self.monochar = self.compute_stationary_emission_dist()
-        self.dichar = self.compute_stationary_emission_digram_dist()
 
     @property
     def trans(self):
@@ -39,8 +34,6 @@ class HiddenMarkovModel:
         assert value.shape == self._trans.shape  # no broadcasting
         self._trans[:, :] = value / value.sum(axis=1, keepdims=True)
         self.initial = self.compute_initial_distribution()
-        self.monochar = self.compute_stationary_emission_dist()
-        self.dichar = self.compute_stationary_emission_digram_dist()
 
     def compute_initial_distribution(self):
 
@@ -65,11 +58,15 @@ class HiddenMarkovModel:
     def compute_stationary_emission_digram_dist(self):
 
         hidden_pair_prior = self.initial[:, None] * self.trans
-        emit_likes = (self.emits[:, None, :, None] *
-                      self.emits[None, :, None, :])
-        joint = hidden_pair_prior[:, :, None, None] * emit_likes
+        assert np.isclose(hidden_pair_prior.sum(), 1), hidden_pair_prior.sum()
+        joint = np.zeros([self.nchars, self.nchars])
+        for i, dist in enumerate(hidden_pair_prior):
+            for j, probij in enumerate(dist):
+                conditionals = self.emits[i, :, None] * self.emits[j, None, :]
+                joint += probij * conditionals
+        assert np.isclose(joint.sum(), 1), joint.sum()
 
-        return np.sum(joint, axis=(0, 1))
+        return joint / np.sum(joint)
 
     def prior_given_past(self, idx):
         """ The hidden-state distributions given the strict past.
@@ -146,7 +143,8 @@ class HiddenMarkovModel:
         """ Sample sequence of emissions given sequence of hidden states. """
 
         dists = self.emits[hidden_states, :]
-        dists = 1e-5*self.monochar + (1 - 1e-5)*dists  # avoid all-zero dists
+        monochar = self.compute_stationary_emission_dist()
+        dists = 1e-5*monochar + (1 - 1e-5)*dists  # avoid all-zero dists
 
         return np.int64([np.random.choice(self.nchars, p=p) for p in dists])
 
@@ -180,6 +178,57 @@ class HiddenMarkovModel:
             emits[:, emission] += hdist
 
         return emits
+
+    def fit(self, train, val, num_epochs, old_weight=10.0,
+                  num_train_steps=None, num_val_steps=None):
+        """ Train on stacks of sequences, of shape [N, T]. """
+
+        trainhist = []
+        valhist = []
+
+        for epoch_idx in range(num_epochs):
+
+            print("======== EPOCH NUMBER %s ========" % (epoch_idx + 1,))
+            print("")
+
+            tsums = old_weight * self.trans.copy()
+            esums = old_weight * self.emits.copy()
+
+            print("Training pass . . .")
+            train = train[np.random.permutation(len(train)),]
+            tlosses = []
+            for sequence in tqdm(train[:num_train_steps], unit=" sequences"):
+                tlosses.append(np.mean(self.nlogps(sequence)))
+                forward = self.prior_given_past(sequence)
+                backward = self.likelihood_of_future(sequence)
+                tsums += self.sum_trans_joints(forward, backward)
+                esums += self.sum_emits_joints(forward, backward, sequence)
+            trainpair = np.mean(tlosses), np.std(tlosses)
+            trainhist.append(trainpair)
+            print("Mean training loss: %.5f +/- %.5f" % trainpair)
+            print()
+
+            self.trans = tsums / tsums.sum(axis=1, keepdims=True)
+            self.emits = esums / esums.sum(axis=1, keepdims=True)
+
+            print("Validation pass . . .")
+            # in case we don't use the whole validation set, we shuffle:
+            val = val[np.random.permutation(len(val)),]
+            vlosses = []
+            for sequence in tqdm(val[:num_val_steps], unit=" sequences"):
+                vlosses.append(np.mean(self.nlogps(sequence)))
+            valpair = np.mean(vlosses), np.std(vlosses)
+            valhist.append(valpair)
+            print("Mean validation loss: %.5f +/- %.5f" % valpair)
+            print()
+
+            print("Sample sequence:")
+            print("----------------")
+            print("%r" % "".join(chr(i) for i in self.sample(length=1000)))
+            print()
+
+        return trainhist, valhist
+
 
 
 def _test_that_hidden_markov_model_finds_the_right_stationary_distribution():
@@ -244,10 +293,11 @@ def _test_that_stationary_character_probabilities_are_correct():
     model = HiddenMarkovModel(3, 2)
     sample = model.sample(length=1000)
     counts, _ = np.histogram(sample, range(model.nchars + 1))
-    freqs = counts / np.sum(counts)
+    estimated = counts / np.sum(counts)
+    computed = model.compute_stationary_emission_dist()
 
     assert np.sum(counts) == len(sample)
-    assert np.allclose(model.monochar, counts / len(sample), atol=0.1)
+    assert np.allclose(computed, estimated, atol=0.1)
 
 
 def _test_that_stationary_character_digram_probabilities_are_correct():
