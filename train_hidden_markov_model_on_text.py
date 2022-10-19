@@ -9,13 +9,13 @@ from models.baselines import MonogramModel, DigramModel
 
 
 num_classes = 256  # alphabet size
-seq_length = 100  # length of the snippets to be predicted
-num_hidden_states = 500  # number of hidden states in the HMM
+seq_length = 30  # length of the snippets to be predicted
+num_hidden_states = 400  # number of hidden states in the HMM
 
-old_weight = 10.0
+old_weight = 50.0 * seq_length
 num_epochs = 100
-num_train_steps = 300  # `None` means unlimited
-num_val_steps = 300  # `None` means unlimited
+num_train_steps = 30  # `None` means unlimited
+num_val_steps = 30  # `None` means unlimited
 
 
 # load the data:

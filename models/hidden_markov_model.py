@@ -191,25 +191,33 @@ class HiddenMarkovModel:
             print("======== EPOCH NUMBER %s ========" % (epoch_idx + 1,))
             print("")
 
-            tsums = old_weight * self.trans.copy()
-            esums = old_weight * self.emits.copy()
+            tsums = np.zeros_like(self.trans)
+            esums = np.zeros_like(self.emits)
 
             print("Training pass . . .")
             train = train[np.random.permutation(len(train)),]
             tlosses = []
+            chars_seen = 0.0
             for sequence in tqdm(train[:num_train_steps], unit=" sequences"):
                 tlosses.append(np.mean(self.nlogps(sequence)))
                 forward = self.prior_given_past(sequence)
                 backward = self.likelihood_of_future(sequence)
                 tsums += self.sum_trans_joints(forward, backward)
                 esums += self.sum_emits_joints(forward, backward, sequence)
+                chars_seen += len(sequence)
             trainpair = np.mean(tlosses), np.std(tlosses)
             trainhist.append(trainpair)
             print("Mean training loss: %.5f +/- %.5f" % trainpair)
             print()
 
-            self.trans = tsums / tsums.sum(axis=1, keepdims=True)
-            self.emits = esums / esums.sum(axis=1, keepdims=True)
+            tsums /= tsums.sum(axis=1, keepdims=True)
+            esums /= esums.sum(axis=1, keepdims=True)
+
+            old_prop = old_weight / (chars_seen + old_weight)
+            new_prop = 1 - old_prop
+
+            self.trans = old_prop*self.trans + new_prop*tsums
+            self.emits = old_prop*self.emits + new_prop*esums
 
             print("Validation pass . . .")
             # in case we don't use the whole validation set, we shuffle:
