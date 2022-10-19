@@ -108,7 +108,7 @@ class LSTMCharacterPredictor(torch.nn.Module):
             val = val[np.random.permutation(len(val)),]
             batches = np.split(val, range(bsize, len(val), bsize))
             batches = torch.stack(batches[:-1], axis=0)
-            batches = batches[:max_train_steps]
+            batches = batches[:max_val_steps]
             vlosses = []
             for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
                 time_first_ints = batch.T  # so [seqlen, bsize]
