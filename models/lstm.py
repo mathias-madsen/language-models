@@ -84,9 +84,8 @@ class LSTMCharacterPredictor(torch.nn.Module):
 
             print("Training pass . . .")
             train = train[np.random.permutation(len(train)),]
-            batches = np.split(train, range(bsize, len(train), bsize))
-            batches = torch.stack(batches[:-1], axis=0)
-            batches = batches[:max_train_steps]
+            tuple_of_batches = torch.split(train, bsize)
+            batches = torch.stack(tuple_of_batches[:-1][:max_train_steps], axis=0)
             tlosses = []
             for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
                 time_first_ints = batch.T  # so [seqlen, bsize]
@@ -106,9 +105,8 @@ class LSTMCharacterPredictor(torch.nn.Module):
             print("Validation pass . . .")
             # in case we don't use the whole validation set, we shuffle:
             val = val[np.random.permutation(len(val)),]
-            batches = np.split(val, range(bsize, len(val), bsize))
-            batches = torch.stack(batches[:-1], axis=0)
-            batches = batches[:max_val_steps]
+            tuple_of_batches = torch.split(val, bsize)
+            batches = torch.stack(tuple_of_batches[:-1][:max_val_steps], axis=0)
             vlosses = []
             for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
                 time_first_ints = batch.T  # so [seqlen, bsize]
