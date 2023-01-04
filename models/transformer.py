@@ -1,5 +1,7 @@
 # import numpy as np
 import torch
+import numpy as np
+from tqdm import tqdm
 
 
 class MultiHeadedSelfAttentionLayer(torch.nn.Module):
@@ -52,6 +54,181 @@ class MultiHeadedSelfAttentionLayer(torch.nn.Module):
         return self.outdense(concat_aves), weights
 
 
+
+def add_positional_encodings(x, dmodel):
+    """ Add time-identifying dimensions to a batch of vector sequences. """
+    batch_size, seq_length, dim = x.shape
+    timespan = torch.linspace(0, torch.pi, seq_length)
+    # timespan = torch.range(0, seq_length) / 1000
+    # exponents = torch.range(dim // 2) / dmodel
+    # cosfreqs = 1000 ** (dmodel)
+    cosines = torch.stack([torch.cos(timespan * 2**k)
+                           for k in range(dim // 2)], dim=-1)
+    sines = torch.stack([torch.sin(timespan * 2**k)
+                         for k in range(dim // 2)], dim=-1)
+    sinusoids = torch.concat([cosines, sines], dim=-1)
+    newdims = torch.tile(sinusoids, [batch_size, 1, 1])
+    return x + newdims
+
+
+class TransformerDecoderLayer(torch.nn.Module):
+
+    def __init__(self, dim, nheads, use_causal_masking=False, attn_dropout=0,
+                 relu_dropout=0):
+
+        super().__init__()
+        self.relu_dropout = relu_dropout
+        self.mha = MultiHeadedSelfAttentionLayer(dim,
+                                                 nheads,
+                                                 use_causal_masking,
+                                                 attn_dropout)
+        self.norm1 = torch.nn.LayerNorm(dim)
+        self.norm2 = torch.nn.LayerNorm(dim)
+        self.affine1 = torch.nn.Linear(dim, dim)
+        self.affine2 = torch.nn.Linear(dim, dim)
+
+    def forward(self, x):
+        y, weights = self.mha(x)
+        x = self.norm1(x + y)
+        x = self.affine1(x)
+        x = torch.nn.functional.relu(x)
+        x = torch.nn.functional.dropout(x, self.relu_dropout, self.training)
+        return self.norm2(x + self.affine2(x))
+
+
+class TransformerDecoder(torch.nn.Module):
+
+    def __init__(self, dim, nheads, use_causal_masking=False, attn_dropout=0,
+                 relu_dropout=0, num_layers=12):
+
+        super().__init__()
+        self.layers = []
+        for idx in range(num_layers):
+            layer = TransformerDecoderLayer(dim,
+                                            nheads,
+                                            use_causal_masking,
+                                            attn_dropout,
+                                            relu_dropout)
+            self.layers.append(layer)
+
+    def forward(self, x):
+        x = add_positional_encodings(x, self.dim)
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class TransformerDecoderCharacterPredictor(torch.nn.Module):
+
+    def __init__(self, num_classes, dim, nheads, use_causal_masking=True,
+                 attn_dropout=0, relu_dropout=0, num_layers=12,
+                 charprobs=None):
+
+        super().__init__()
+        self.dim = dim
+        self.num_classes = num_classes
+        self.charprobs = charprobs
+        self.character_encodings = torch.nn.Parameter(
+            12**0.5 * torch.rand(num_classes, dim) - 0.5  # mean 0, var 1
+            )
+        self.readout_layer = torch.nn.Linear(dim, num_classes)
+        self.layers = []
+        for idx in range(num_layers):
+            layer = TransformerDecoderLayer(dim,
+                                            nheads,
+                                            use_causal_masking,
+                                            attn_dropout,
+                                            relu_dropout)
+            self.layers.append(layer)
+
+    def forward(self, character_indices):
+        idx = character_indices.type(torch.int64)
+        x = self.character_encodings[idx, :]
+        x = add_positional_encodings(x, self.dim)
+        for layer in self.layers:
+            x = layer(x)
+        return self.readout_layer(x)
+
+    def sample(self, length):
+
+        if length < 1:
+            return []
+
+        idx0 = np.random.choice(self.num_classes, p=self.charprobs)
+        seq = [idx0]
+
+        while len(seq) < length:
+            context = torch.tensor([seq])  # 1-sequence batch
+            batch_time_logdists = self(context)
+            last_logdist = batch_time_logdists[0, -1]  # first batch, last time
+            last_dist = torch.softmax(last_logdist, dim=0)
+            cond_char_probs = last_dist.detach().numpy()
+            idx = np.random.choice(self.num_classes, p=cond_char_probs)
+            seq.append(idx)
+
+        return "".join(chr(idx) for idx in seq)
+
+    def fit(self, train, val, num_epochs, bsize=1, lr=0.05,
+                  max_train_steps=None, max_val_steps=None):
+        """ Train on stacks of sequences, of shape [N, T]. """
+
+        optimizer = torch.optim.SGD(self.parameters(), lr=lr)
+        xent = torch.nn.CrossEntropyLoss()
+        trainhist = []
+        valhist = []
+
+        for epoch_idx in range(num_epochs):
+
+            print("======== EPOCH NUMBER %s ========" % (epoch_idx + 1,))
+            print("")
+
+            print("Training pass . . .")
+            train = train[np.random.permutation(len(train)),]
+            tuple_of_batches = torch.split(train, bsize)
+            batches = torch.stack(tuple_of_batches[:-1][:max_train_steps], axis=0)
+            tlosses = []
+            for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
+                optimizer.zero_grad()
+                logits = self(batch)[:, :-1, :]  # [bsize, len - 1, nclasses]
+                targets = batch[:, 1:]  # logits[:, 0] has seen token 0
+                assert logits.shape[:2] == targets.shape
+                logits_flat = logits.reshape([-1, self.num_classes])
+                targets_flat = targets.reshape([-1])
+                meanloss = xent(logits_flat, targets_flat)
+                tlosses.append(float(meanloss))
+                meanloss.backward()
+                optimizer.step()
+            trainpair = np.mean(tlosses), np.std(tlosses)
+            trainhist.append(trainpair)
+            print("Mean training loss: %.5f +/- %.5f" % trainpair)
+            print()
+
+            print("Validation pass . . .")
+            # in case we don't use the whole validation set, we shuffle:
+            val = val[np.random.permutation(len(val)),]
+            tuple_of_batches = torch.split(val, bsize)
+            batches = torch.stack(tuple_of_batches[:-1][:max_val_steps], axis=0)
+            vlosses = []
+            for batch in tqdm(batches, unit_scale=bsize, unit=" sequences"):
+                logits = self(batch)
+                logits_flat = logits.reshape([-1, self.num_classes])
+                targets_flat = batch.reshape([-1])
+                meanloss = xent(logits_flat, targets_flat)
+                vlosses.append(float(meanloss))
+            valpair = np.mean(vlosses), np.std(vlosses)
+            valhist.append(valpair)
+            print("Mean validation loss: %.5f +/- %.5f" % valpair)
+            print()
+
+            print("Sample sequence:")
+            print("----------------")
+            print("%r" % self.sample(length=300))
+            print()
+
+        return trainhist, valhist
+
+
+
 def _test_multi_headed_self_attention_layer():
 
     num_heads = 2
@@ -90,3 +267,19 @@ def _test_multi_headed_self_attention_layer():
 
     assert torch.allclose(attn_weights, weights)
     assert torch.allclose(attn_vals, aves)
+
+
+def _test_transformer_decoder():
+
+    dim = 6
+    nheads = 3
+
+    decoder = TransformerDecoder(dim=dim,
+                                 nheads=nheads,
+                                 use_causal_masking=False,
+                                 attn_dropout=0,
+                                 relu_dropout=0,
+                                 num_layers=12)
+    
+    x = torch.rand(4, 10, dim)
+    y = decoder(x)
